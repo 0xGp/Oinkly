@@ -20,11 +20,13 @@ Live: https://oinkly-kids.vercel.app
 2. Go to Mini Apps, then Custom URL, and enter `https://oinkly-kids.vercel.app`.
 
 ## For grown-ups
-1. Tap **Grown-up corner** and enter the PIN (the demo PIN is `1234`; change it on the first visit).
-2. Add each child, then paste their Piggy address (`NQ...`) or tap the button to use your own Nimiq Pay account.
-3. Add Quests with coin rewards, and set each child's Dream.
-4. When a child taps "I did it!", approve the quest. Nimiq Pay sends the NIM with a note like `Quest: Make my bed`.
-5. Use **Pocket money** to send coins in one tap, and approve or decline "Ask to spend" requests.
+1. Open Oinkly in Nimiq Pay. Your Nimiq address becomes your family account (outside Nimiq Pay you can tap **Try a demo family**; payments are off).
+2. **Add child:** type a name, pick an animal and tap **Create Piggy**. Oinkly makes a new Nimiq address for the child (the key stays on your phone; back it up in Settings). You can paste an existing Nimiq address instead.
+3. **Link Piggy:** send 1 NIM with memo `Oinkly:link:<childId>`, then tap **Check link**. The first link payment to a Piggy decides its grown-up, and later ones are ignored.
+4. **Kid's phone:** tap it to show a QR code. Your child scans it and sees only their own Piggy, with no wallet.
+5. Add Quests and set the Dream. When your child taps "I did it!", tap **Pay**: Nimiq Pay sends the NIM with a note like `Quest: Make bed · Ada`.
+6. Send **Pocket money** in one tap, and answer "Ask to spend" requests.
+7. Settings: set a 4-digit PIN, back up Piggy keys, and copy the **family recovery code** to open the family on a second grown-up phone.
 
 ## For kids
 - Tap the piggy and watch the coins drop in.
@@ -39,18 +41,20 @@ The app is set up for **mainnet**: payments move real NIM. To test without real 
 1. In Nimiq Pay, long-press **Settings** for about 10 seconds to open the developer menu, then switch to **Testnet**.
 2. Tap **Get free NIM**.
 3. Payments from Oinkly will now use test NIM, because Nimiq Pay sends them on whichever network it is on.
-Note: the Piggy balance shown in the Grown-up corner is still read from mainnet, so it won't show test NIM.
+Note: the Piggy balance and the link check read from mainnet, so on testnet the link won't verify (use the demo family to try the flow).
 
 ## Limits right now
-- Data is saved on one phone only (in the browser's storage), so the kid and parent screens must be on the same device.
+- Created Piggy keys live only on the parent's phone. Back them up.
 - The coin count is kept in the app and isn't matched to the on-chain balance.
-- Approving a spend lowers the coin count but doesn't move NIM.
-- Patience Seeds are app points, not real on-chain interest.
-- The PIN is a simple lock, not real security.
+- Approving a spend lowers the coin count but doesn't move NIM. Patience Seeds are app points.
+- The family is protected by a secret code, not a wallet signature (Nimiq Pay has no sign-message call yet).
+- Not yet tested inside a real Nimiq Pay wallet.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the diagram, data model, conflict rules and custody notes.
 
 ## Run it yourself
 ```
 npm install
-npm run dev
+npx vercel dev   # runs the app plus the /api sync functions
 ```
-Built with Vite, React and TypeScript.
+Built with Vite, React and TypeScript, Vercel functions and Vercel Blob. Set `BLOB_READ_WRITE_TOKEN` for persistent sync; without it the API uses temporary in-memory storage.
