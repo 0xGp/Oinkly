@@ -20,7 +20,7 @@ Live: https://oinkly-kids.vercel.app
 2. Go to Mini Apps, then Custom URL, and enter `https://oinkly-kids.vercel.app`.
 
 ## For grown-ups
-1. Open Oinkly in Nimiq Pay. Your Nimiq address becomes your family account (outside Nimiq Pay you can tap **Try a demo family**; payments are off).
+1. Open Oinkly in Nimiq Pay and answer **Yes** to "Are you a parent?" (kids tap **No** and scan or paste their Piggy link). Your Nimiq address becomes your family account (outside Nimiq Pay you can tap **Try a demo family**; payments are off).
 2. **Add child:** type a name, pick an animal and tap **Create Piggy**. Oinkly makes a new Nimiq address for the child (the key stays on your phone; back it up in Settings). You can paste an existing Nimiq address instead.
 3. **Link Piggy:** send 1 NIM with memo `Oinkly:link:<childId>`, then tap **Check link**. The first link payment to a Piggy decides its grown-up, and later ones are ignored.
 4. **Kid's phone:** tap it to show a QR code. Your child scans it and sees only their own Piggy, with no wallet.
@@ -36,12 +36,13 @@ Live: https://oinkly-kids.vercel.app
 - Tap **Ask to spend** and choose whether it's a Need or a Want.
 - Open **Badges** to read the money lessons you've unlocked.
 
-## Testing with free NIM (testnet)
-The app is set up for **mainnet**: payments move real NIM. To test without real money:
+## Network (testnet by default)
+Oinkly runs on the Nimiq **testnet**: balances and link checks read from `rpc.testnet.nimiqwatch.com` and transaction links open `test.nimiq.watch`. To try it:
 1. In Nimiq Pay, long-press **Settings** for about 10 seconds to open the developer menu, then switch to **Testnet**.
 2. Tap **Get free NIM**.
-3. Payments from Oinkly will now use test NIM, because Nimiq Pay sends them on whichever network it is on.
-Note: the Piggy balance and the link check read from mainnet, so on testnet the link won't verify (use the demo family to try the flow).
+3. Payments from Oinkly now use test NIM. If Nimiq Pay is on a different network than Oinkly, the grown-up corner shows a warning and payments are blocked.
+
+To build for mainnet (real NIM), set `VITE_NIMIQ_NETWORK=mainnet`.
 
 ## Limits right now
 - Created Piggy keys live only on the parent's phone. Back them up.

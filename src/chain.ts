@@ -1,4 +1,13 @@
-import { init, type NimiqProvider } from '@nimiq/mini-app-sdk'
+import { init, getHostNetwork, type Network, type NimiqProvider } from '@nimiq/mini-app-sdk'
+export const NETWORK: Network = import.meta.env.VITE_NIMIQ_NETWORK === 'mainnet' ? 'mainnet' : 'testnet'
+export const TESTNET = NETWORK === 'testnet'
+export const RPC = TESTNET ? 'https://rpc.testnet.nimiqwatch.com' : 'https://rpc.nimiqwatch.com'
+export const txUrl = (hash: string) => `https://${TESTNET ? 'test.' : ''}nimiq.watch/#${hash}`
+/** Message if Nimiq Pay is on a different network than this build, else ''. */
+export function networkMismatch() {
+  const host = getHostNetwork()
+  return host && host !== NETWORK ? `Nimiq Pay is on ${host}, but Oinkly uses ${NETWORK}. Switch networks in Nimiq Pay's developer menu.` : ''
+}
 export const LUNA = 100_000
 export const NIM_PER_COIN = 10
 let p: Promise<NimiqProvider> | null = null
@@ -17,7 +26,6 @@ export async function payCoins(to: string, coins: number, memo: string) {
   if (typeof r === 'object' && r && 'error' in (r as object)) throw new Error(String((r as any).error?.message || 'Payment failed'))
   return String(r)
 }
-export const RPC = 'https://rpc.nimiqwatch.com'
 export async function jarBalanceNim(address: string) {
   const r = await fetch(RPC, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getAccountByAddress', params: [address] }) })
   const j = await r.json(); if (j.error) throw new Error(j.error.message)
@@ -55,6 +63,7 @@ export async function verifyLink(child: string, childId: string, parent: string)
   return { ok: true, hash: first.hash }
 }
 export async function payNim(to: string, nim: number, memo: string) {
+  const wrong = networkMismatch(); if (wrong) throw new Error(wrong)
   const nq = await getNimiq()
   const r = await nq.sendBasicTransactionWithData({ recipient: to, value: Math.round(nim * LUNA), data: memo.slice(0, 64) })
   if (typeof r !== 'string') throw new Error(String((r as any)?.error?.message || 'Payment failed'))

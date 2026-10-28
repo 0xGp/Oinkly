@@ -24,7 +24,33 @@ export default function App() {
   const q = new URLSearchParams(location.search)
   const t = q.get('kid') || localStorage.getItem('oinkly-kid-token')
   if (t) { localStorage.setItem('oinkly-kid-token', t); return <KidApp token={t} /> }
-  return <ParentApp />
+  return <Onboard />
+}
+
+/* ---------------- FIRST SCREEN ---------------- */
+function Onboard() {
+  const [role, setRole] = useState<'parent' | 'kid' | null>(() => sessionStorage.getItem('oinkly-parent') ? 'parent' : null)
+  if (role === 'parent') return <ParentApp back={() => setRole(null)} />
+  if (role === 'kid') return <KidJoin back={() => setRole(null)} />
+  return <div className="app"><header><div className="brand">🐷 Oinkly</div>{C.TESTNET && <div className="muted center">TESTNET</div>}</header><main>
+    <section className="card center"><div style={{ fontSize: 90 }}>🐷</div><h2>Are you a parent?</h2>
+      <p className="muted">Grown-ups set up the family. Kids open their own Piggy.</p>
+      <button className="go wide" onClick={() => setRole('parent')}>Yes, I'm a parent 👪</button>
+      <button className="pill" style={{ marginTop: 10 }} onClick={() => setRole('kid')}>No, I'm a kid 🧒</button>
+    </section></main></div>
+}
+
+function KidJoin({ back }: { back: () => void }) {
+  const [v, setV] = useState('')
+  const token = (() => { const s = v.trim(); try { return new URL(s).searchParams.get('kid') || '' } catch { return s } })()
+  return <div className="app"><header><div className="brand">🐷 Oinkly</div></header><main>
+    <section className="card center"><div style={{ fontSize: 90 }}>🧒</div><h2>Hi there!</h2>
+      <p className="muted">Ask your grown-up to open <b>Kid's phone</b> in Oinkly, then scan the QR code with this phone's camera.</p>
+      <p className="muted">Or paste the link they sent you:</p>
+      <input placeholder="Paste your Piggy link" value={v} onChange={e => setV(e.target.value)} />
+      <button className="go wide" disabled={token.length < 16} onClick={() => { location.href = `/?kid=${encodeURIComponent(token)}` }}>Open my Piggy 🐷</button>
+      <button className="pill" style={{ marginTop: 10 }} onClick={back}>← Back</button>
+    </section></main></div>
 }
 
 /* ---------------- KID DEVICE ---------------- */
@@ -94,7 +120,7 @@ function AskSpend({ coins, onAsk }: { coins: number; onAsk: (w: string, c: numbe
 }
 
 /* ---------------- PARENT DEVICE ---------------- */
-function ParentApp() {
+function ParentApp({ back }: { back: () => void }) {
   const [addr, setAddr] = useState<string | null>(() => sessionStorage.getItem('oinkly-parent'))
   const [demo, setDemo] = useState(() => sessionStorage.getItem('oinkly-demo') === '1')
   const [err, setErr] = useState('')
@@ -105,6 +131,7 @@ function ParentApp() {
       {err && <p className="muted">({err})</p>}
       <button className="go wide" onClick={() => C.parentAddress().then(a => { sessionStorage.setItem('oinkly-parent', a); setAddr(a) }).catch(e => setErr(C.errMsg(e)))}>Connect Nimiq Pay</button>
       <button className="pill" style={{ marginTop: 10 }} onClick={() => { const a = newPiggyKey().address; sessionStorage.setItem('oinkly-parent', a); sessionStorage.setItem('oinkly-demo', '1'); setDemo(true); setAddr(a) }}>Try a demo family (no payments)</button>
+      <button className="pill" style={{ marginTop: 10 }} onClick={back}>← Back</button>
     </section></main></div>
   return <Family parent={addr} demo={demo} />
 }
@@ -138,7 +165,7 @@ function Family({ parent, demo }: { parent: string; demo: boolean }) {
     act={(op, msg) => { setFam(f => f && applyKidLocal(f, kid.id, op)); fetch(`/api/kid?t=${kid.token}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(op) }).then(() => sync()); if (msg) say(msg) }} />
   return <div className="app">
     {toast && <div className="toast" role="status">{toast}</div>}
-    <header><div className="brand">🐷 Oinkly</div><div className="muted center">Family of <code>{P.slice(0, 4)}…{P.slice(-4)}</code>{demo && ' · DEMO (payments off)'}{storage === 'memory' && ' · ⚠️ temp storage'}</div></header>
+    <header><div className="brand">🐷 Oinkly</div><div className="muted center">Family of <code>{P.slice(0, 4)}…{P.slice(-4)}</code>{C.TESTNET && ' · TESTNET'}{demo && ' · DEMO (payments off)'}{storage === 'memory' && ' · ⚠️ temp storage'}</div></header>
     <Parent fam={fam} kid={kid} parent={P} demo={demo} kKey={kKey} pKey={pKey} setActive={setActive} sync={sync} say={say} coinDrop={coinDrop} naira={naira} openKid={() => setView('kid')} />
     <section className="card"><Recovery sKey={sKey} secret={secret} /></section>
   </div>
@@ -203,11 +230,12 @@ function Parent({ fam, kid, parent, demo, kKey, pKey, setActive, sync, say, coin
   }
   const ready = kid?.linked
   return <main>
+    {!demo && C.networkMismatch() && <section className="card"><p>⚠️ {C.networkMismatch()}</p></section>}
     <section className="card"><h2>Grown-up corner 👨‍👩‍👧</h2>
       <div className="kids">{fam.kids.map(k => <button key={k.id} className={'kidchip ' + (k.id === kid?.id ? 'on' : '')} onClick={() => setActive(k.id)}>{k.avatar} {k.name}{k.linked ? ' 🔗' : ''}</button>)}</div>
       {kid ? <>
         <div className="muted">Piggy: <code style={{ fontSize: 12 }}>{kid.jar}</code><br />{bal == null ? 'Balance: reading chain…' : bal < 0 ? 'Balance: Nimiq RPC unavailable' : `On-chain: ${bal.toFixed(2)} NIM`} · {kid.custody === 'app-key' ? 'key kept on this phone' : 'your own wallet address'}</div>
-        {kid.linked ? <p>🔗 <b>Linked to you on-chain</b> {kid.linkTx && kid.linkTx !== 'demo' && <a href={`https://nimiq.watch/#${kid.linkTx}`} target="_blank">view</a>}</p>
+        {kid.linked ? <p>🔗 <b>Linked to you on-chain</b> {kid.linkTx && kid.linkTx !== 'demo' && <a href={C.txUrl(kid.linkTx)} target="_blank">view</a>}</p>
           : <div><p className="muted">Step 2: send 1 NIM with memo <code>{C.linkMemo(kid.id)}</code>. The first link to a Piggy decides its grown-up.</p>
             <div className="row"><button className="go" disabled={!!busy} onClick={link}>🔗 Link Piggy (1 NIM)</button>{kid.linkTx && <button className="pill" onClick={check}>Check link</button>}</div></div>}
         <div className="row"><button className="pill" onClick={async () => { const url = `${location.origin}/?kid=${kid.token}`; setQr(await QRCode.toDataURL(url, { width: 360, margin: 1 })) }}>📱 Kid's phone</button><button className="pill" onClick={openKid}>👀 Open kid screen here</button></div>

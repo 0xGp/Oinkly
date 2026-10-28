@@ -8,7 +8,7 @@ flowchart LR
     PW["Parent wallet<br/>NQ.. = family account"]
     PA["Oinkly grown-up corner<br/>(PIN, child keys, family secret)"]
   end
-  subgraph Chain["Nimiq mainnet"]
+  subgraph Chain["Nimiq testnet (mainnet via VITE_NIMIQ_NETWORK)"]
     PIG["Child Piggy address<br/>NQ.. (key made in browser)"]
     LINK["1st tx memo<br/>Oinkly:link:&lt;childId&gt;"]
     PAY["Quest / pocket money tx<br/>memo: Quest: Make bed · Ada"]
@@ -18,7 +18,7 @@ flowchart LR
     BLOB[("Vercel Blob (private)<br/>family/&lt;parentAddr&gt;.json<br/>token/&lt;kidToken&gt;.json")]
   end
   KID["Kid phone<br/>?kid=&lt;token&gt; · no wallet, no crypto words"]
-  RPC["rpc.nimiqwatch.com<br/>getTransactionsByAddress / getAccountByAddress"]
+  RPC["rpc.testnet.nimiqwatch.com<br/>getTransactionsByAddress / getAccountByAddress"]
 
   PW -- listAccounts --> PA
   PA -- sendBasicTransactionWithData --> LINK --> PIG
@@ -66,6 +66,6 @@ Kept **only on the parent phone** (localStorage): child private keys, the PIN, a
 ## Limits
 - Coins in the app are counted from approved payments; they are not reconciled against the on-chain balance.
 - Patience Seeds are app points, not on-chain interest. Approving a spend moves no NIM.
-- RPC reads use the public, rate-limited rpc.nimiqwatch.com (it was returning 503 during part of development); the balance and link check show an error and can be retried.
+- RPC reads use the public, rate-limited nimiqwatch RPC (`rpc.testnet.nimiqwatch.com`, or `rpc.nimiqwatch.com` on mainnet); the balance and link check show an error and can be retried.
 - Not yet tested inside a real Nimiq Pay wallet.
 - Storage: Vercel Blob (private store `oinkly-sync`). Without `BLOB_READ_WRITE_TOKEN` the API falls back to in-memory storage (demo only, lost on cold start). Swap `api/_store.ts` for any key-value store.
