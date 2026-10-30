@@ -16,7 +16,7 @@ export default async function handler(req: any, res: any) {
     const after = rec.family.kids.find(k => k.id === kid.id)!.breaks || []
     if (body.op === 'broke' && after.length !== before) {
       const b = after[after.length - 1]
-      rec.family.log = [`${new Date(b.at).toLocaleString()} 🔨 ${kid.name} broke the bank: ${b.nim} NIM to ${b.to === 'shop' ? 'a shop' : 'you'} for "${b.what}" · ${b.tx.slice(0, 10)}…`, ...rec.family.log].slice(0, 30)
+      rec.family.log = [`${new Date(b.at).toLocaleString()} 🔨 ${kid.name} broke the bank: ${b.nim} NIM to you for "${b.what}" · ${b.tx.slice(0, 10)}…`, ...rec.family.log].slice(0, 30)
     }
     await store.write(key, rec)
   }

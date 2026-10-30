@@ -72,12 +72,13 @@ export async function payNim(to: string, nim: number, memo: string) {
   return r
 }
 export const normAddr = (a: string) => a.replace(/\s/g, '').toUpperCase()
-/** Sends the whole Piggy balance, signed in the browser with the Piggy key. */
-export async function breakBank(privHex: string, to: string, memo: string) {
-  const luna = (await rpc<{ balance: number }>('getAccountByAddress', [addressFromPrivateKey(privHex)])).balance
-  if (!luna) throw new Error('Your Piggy is empty on-chain. Ask your grown-up to pay your quests first.')
+/** Sends `nim` from the Piggy, signed in the browser with the Piggy key. */
+export async function breakBank(privHex: string, to: string, nim: number, memo: string) {
+  const luna = Math.round(nim * LUNA)
+  const have = (await rpc<{ balance: number }>('getAccountByAddress', [addressFromPrivateKey(privHex)])).balance
+  if (have < luna) throw new Error(`Your Piggy only holds ${have / LUNA} NIM but this needs ${nim} NIM. Ask your grown-up to check your payments.`)
   const height = await rpc<number>('getBlockNumber', [])
   const { hex, hash } = signPayment(privHex, to, BigInt(luna), 0n, height, NETWORK_ID, memo)
   await rpc('sendRawTransaction', [hex])
-  return { hash, nim: luna / LUNA }
+  return { hash, nim }
 }

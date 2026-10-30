@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import * as C from './chain'
 import { addressFromPrivateKey, cleanKey, newPiggyKey, signLogin, validKey } from './keys'
-import { LESSONS, WEEK, uid, applyParent, applyKid, type Break, type Family, type Kid, type KidView, type KidOp, type ParentOp } from './model'
+import { LESSONS, WEEK, uid, applyParent, applyKid, type Break, type Family, type Kid, type KidView, type KidOp, type ParentOp, type Spend } from './model'
 
 let actx: AudioContext | null = null
 function clink() {
@@ -21,6 +21,7 @@ function useToast() { const [t, setT] = useState(''); return [t, (m: string) => 
 function useNgn() { const [v, setV] = useState<number | null>(null); useEffect(() => { C.nimNgn().then(setV).catch(() => {}) }, []); return (c: number) => v ? `≈ ₦${Math.round(c * C.NIM_PER_COIN * v).toLocaleString()}` : '' }
 
 const KEY = 'oinkly-kid-key'
+const shareOrigin = () => /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && import.meta.env.VITE_LAN_ORIGIN ? import.meta.env.VITE_LAN_ORIGIN : location.origin
 async function kidLogin(key: string) {
   const j = await api('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(signLogin(key)) })
   localStorage.setItem('oinkly-kid-token', j.token); localStorage.setItem(KEY, cleanKey(key))
@@ -34,6 +35,33 @@ export default function App() {
   const t = q.get('kid') || localStorage.getItem('oinkly-kid-token')
   if (t) { localStorage.setItem('oinkly-kid-token', t); return <KidApp token={t} /> }
   return <Onboard />
+}
+
+function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return <div className="modal-bg" onClick={onClose}><div className="modal card" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>{children}</div></div>
+}
+
+function Receipt({ b, name, avatar, forParent, onClose }: { b: Break; name: string; avatar: string; forParent?: boolean; onClose: () => void }) {
+  const coins = b.coins ?? Math.round(b.nim / C.NIM_PER_COIN)
+  const earned = b.earned || []
+  const saved = coins - earned.reduce((s, q) => s + q.coins, 0)
+  return <Modal onClose={onClose}><div className="receipt">
+    <div className="rhead"><div className="brand" style={{ fontSize: 22 }}>🐷 Oinkly</div><b>RECEIPT</b><small className="muted">#{b.tx.slice(0, 8).toUpperCase()}</small></div>
+    <div className="rstamp">PAID</div>
+    <div className="rrow"><span>Date</span><span>{new Date(b.at).toLocaleString()}</span></div>
+    <div className="rrow"><span>From</span><span>{avatar} {name}'s Piggy</span></div>
+    <div className="rrow"><span>To</span><span>{forParent ? 'You, the grown-up' : 'My grown-up'}</span></div>
+    <div className="rrow"><span>For</span><span>{b.what}{b.need != null && (b.need ? ' · 🍎 Need' : ' · 🎮 Want')}</span></div>
+    <div className="rsec">Earned by doing</div>
+    {earned.length ? earned.map((q, i) => <div className="rrow" key={i}><span>{q.emoji} {q.title}</span><span>{q.coins} 🪙</span></div>)
+      : <p className="muted">No new quests since the last receipt.</p>}
+    {saved > 0 && <div className="rrow"><span>🐷 From savings &amp; pocket money</span><span>{saved} 🪙</span></div>}
+    <div className="rrow rtotal"><span>Total sent</span><span>{coins} 🪙{forParent ? ` = ${b.nim} NIM` : ''}</span></div>
+    {forParent
+      ? <p className="muted">💵 The NIM is in your Nimiq Pay wallet. Cash it out and get {name}'s {b.what}. <a href={C.txUrl(b.tx)} target="_blank">View payment</a></p>
+      : <p className="muted center">✅ Sent to your grown-up. Now they can get your {b.what}!</p>}
+    <button className="go wide" onClick={onClose}>{forParent ? 'Got it' : 'Yay! 🎉'}</button>
+  </div></Modal>
 }
 
 /* ---------------- FIRST SCREEN ---------------- */
@@ -82,16 +110,20 @@ function KidApp({ token }: { token: string }) {
   const [err, setErr] = useState('')
   const [toast, say] = useToast()
   const prev = useRef(0)
+  const last = useRef<KidView | null>(null)
+  const [receipt, setReceipt] = useState<Break | null>(null)
   const [drop, setDrop] = useState(0)
   const naira = useNgn()
   const coinDrop = () => { setDrop(d => d + 1); clink() }
   async function load(op?: KidOp) {
     try {
       const j = await api(`/api/kid?t=${encodeURIComponent(token)}`, op ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(op) } : undefined)
-      const k = j.kid as KidView
-      if (prev.current && k.coins + k.seeds > prev.current) { coinDrop(); say('🪙 Coins arrived in your Piggy!') }
-      const newL = kid && k.lessons.find(l => !kid.lessons.includes(l)); if (newL) setTimeout(() => say(`🏅 New badge: ${LESSONS.find(l => l.id === newL)?.title}!`), 900)
-      prev.current = k.coins + k.seeds; setKid(k); setParent(j.parent); setErr('')
+      const k = j.kid as KidView, old = last.current
+      const paid = old && k.quests.find(q => q.status === 'paid' && old.quests.find(o => o.id === q.id)?.status !== 'paid')
+      if (paid) { coinDrop(); say(`🎉 Your grown-up paid you ${paid.coins} coins for "${paid.title}"!`) }
+      else if (prev.current && k.coins + k.seeds > prev.current) { coinDrop(); say('🪙 Coins arrived in your Piggy!') }
+      const newL = old && k.lessons.find(l => !old.lessons.includes(l)); if (newL) setTimeout(() => say(`🏅 New badge: ${LESSONS.find(l => l.id === newL)?.title}!`), 900)
+      prev.current = k.coins + k.seeds; last.current = k; setKid(k); setParent(j.parent); setErr('')
     } catch (e) { setErr(String((e as Error).message)) }
   }
   useEffect(() => { load(); const i = setInterval(() => load(), 10_000); return () => clearInterval(i) }, [token])
@@ -102,19 +134,23 @@ function KidApp({ token }: { token: string }) {
   }
   if (!kid) return <div className="app"><header><div className="brand">🐷 Oinkly</div></header><section className="card center">{err ? <>😕 {err}<br /><button className="pill" onClick={logout}>Start over</button></> : 'Opening your Piggy…'}</section></div>
   const act = async (op: KidOp, msg?: string) => { await load(op); if (msg) say(msg) }
-  return <KidScreen kid={kid} toast={toast} drop={drop} coinDrop={coinDrop} naira={naira} act={act}
-    header={<button onClick={logout} title="Log out">🚪</button>}
-    extra={<BreakBank name={kid.name} parent={parent} keyHex={key} onKey={addKey}
-      onBroke={b => { coinDrop(); act({ op: 'broke', brk: b }, `🔨 CRASH! ${b.nim} NIM sent. Enjoy your ${b.what}!`) }} />} />
+  async function broke(s: Spend, tx: string, nim: number) {
+    coinDrop()
+    await act({ op: 'broke', brk: { at: Date.now(), what: s.what, nim, to: 'grown-up', tx, spendId: s.id } }, `🔨 CRASH! ${s.coins} coins sent for your ${s.what}!`)
+    const b = last.current?.breaks?.find(x => x.tx === tx); if (b) setReceipt(b)
+  }
+  return <>
+    <KidScreen kid={kid} toast={toast} drop={drop} coinDrop={coinDrop} naira={naira} act={act}
+      header={<button onClick={logout} title="Log out">🚪</button>}
+      extra={<BreakBank kid={kid} parent={parent} keyHex={key} onKey={addKey} onBroke={broke} onReceipt={setReceipt} />} />
+    {receipt && <Receipt b={receipt} name={kid.name} avatar={kid.avatar} onClose={() => setReceipt(null)} />}
+  </>
 }
 
-function BreakBank({ name, parent, keyHex, onKey, onBroke }: { name: string; parent: string; keyHex: string; onKey: (k: string) => void; onBroke: (b: Break) => void }) {
+function BreakBank({ kid, parent, keyHex, onKey, onBroke, onReceipt }: { kid: KidView; parent: string; keyHex: string; onKey: (k: string) => void; onBroke: (s: Spend, tx: string, nim: number) => Promise<void>; onReceipt: (b: Break) => void }) {
   const [bal, setBal] = useState<number | null>(null)
-  const [what, setWhat] = useState('')
-  const [to, setTo] = useState<Break['to']>('grown-up')
-  const [shop, setShop] = useState('')
-  const [sure, setSure] = useState(false)
-  const [busy, setBusy] = useState(false)
+  const [sure, setSure] = useState('')
+  const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
   const [k, setK] = useState('')
   useEffect(() => {
@@ -122,30 +158,33 @@ function BreakBank({ name, parent, keyHex, onKey, onBroke }: { name: string; par
     const read = () => C.jarBalanceNim(addressFromPrivateKey(keyHex)).then(setBal).catch(() => setBal(-1))
     read(); const i = setInterval(read, 20_000); return () => clearInterval(i)
   }, [keyHex])
-  if (!keyHex) return <section className="card"><h2>Break the bank 🔨</h2>
-    <p className="muted">Want to break your Piggy and get what you saved for? Add the Piggy key your grown-up gave you.</p>
-    <input placeholder="Paste your Piggy key" autoComplete="off" value={k} onChange={e => setK(e.target.value)} />
-    <button className="go wide" disabled={!validKey(k)} onClick={() => onKey(k)}>Add my key 🔑</button></section>
-  const dest = to === 'shop' ? shop.trim() : parent
-  const coins = bal && bal > 0 ? Math.round(bal / C.NIM_PER_COIN * 10) / 10 : 0
-  const ready = coins > 0 && !!what.trim() && C.validAddr(dest) && !busy
-  async function smash() {
-    if (!sure) return setSure(true)
-    setBusy(true); setErr('')
+  const approved = kid.spends.filter(s => s.status === 'ok')
+  const receipts = (kid.breaks || []).slice(-5).reverse()
+  async function smash(s: Spend) {
+    if (sure !== s.id) return setSure(s.id)
+    setBusy(s.id); setErr('')
     try {
-      const r = await C.breakBank(keyHex, dest, `Oinkly: ${name} broke the bank for ${what.trim()}`)
-      onBroke({ at: Date.now(), what: what.trim(), nim: r.nim, to, tx: r.hash }); setBal(0); setWhat(''); setSure(false)
-    } catch (e) { setErr(C.errMsg(e)) } finally { setBusy(false) }
+      const nim = s.coins * C.NIM_PER_COIN
+      const r = await C.breakBank(keyHex, parent, nim, `Oinkly: ${kid.name} broke the bank for ${s.what}`)
+      setBal(b => b != null && b >= 0 ? b - nim : b); setSure('')
+      await onBroke(s, r.hash, nim)
+    } catch (e) { setErr(C.errMsg(e)) } finally { setBusy('') }
   }
   return <section className="card"><h2>Break the bank 🔨</h2>
-    <p className="muted">{bal == null ? 'Counting your Piggy…' : bal < 0 ? "Can't reach your Piggy right now." : `Your Piggy holds ${coins} coins.`} Breaking it sends <b>all</b> your coins at once to get what you want.</p>
-    <input placeholder="What are you getting?" value={what} onChange={e => { setWhat(e.target.value); setSure(false) }} />
-    <div className="row"><button className={'pill ' + (to === 'grown-up' ? 'on' : '')} onClick={() => { setTo('grown-up'); setSure(false) }}>🧑 My grown-up buys it</button>
-      <button className={'pill ' + (to === 'shop' ? 'on' : '')} onClick={() => { setTo('shop'); setSure(false) }}>🏪 Pay a shop</button></div>
-    {to === 'shop' && <input placeholder="Shop's Nimiq address (NQ…)" value={shop} onChange={e => { setShop(e.target.value); setSure(false) }} />}
-    <button className="go wide" disabled={!ready} onClick={smash}>{busy ? 'Breaking…' : sure ? `Yes! Send all ${coins} coins 🔨` : coins > 0 ? '🔨 Break the bank!' : 'Piggy is empty'}</button>
-    {sure && !busy && <button className="pill" onClick={() => setSure(false)}>Not yet, keep saving</button>}
-    {err && <p className="muted">⚠️ {err}</p>}
+    {!keyHex ? <>
+      <p className="muted">To break your Piggy for something your grown-up said yes to, add the Piggy key they gave you.</p>
+      <input placeholder="Paste your Piggy key" autoComplete="off" value={k} onChange={e => setK(e.target.value)} />
+      <button className="go wide" disabled={!validKey(k)} onClick={() => onKey(k)}>Add my key 🔑</button>
+    </> : <>
+      <p className="muted">{bal == null ? 'Counting your Piggy…' : bal < 0 ? "Can't reach your Piggy right now." : `Your Piggy holds ${Math.round(bal / C.NIM_PER_COIN * 10) / 10} coins.`} When your grown-up says yes to a spend, break the bank to send those coins to them so they can buy it.</p>
+      {approved.map(s => <div className="quest" key={s.id}><span className="qe">🛍️</span><div style={{ flex: 1 }}><b>{s.what}</b><small> {s.coins} coins · ✅ approved</small></div>
+        <button className="go" disabled={!!busy || !C.validAddr(parent)} onClick={() => smash(s)}>{busy === s.id ? 'Breaking…' : sure === s.id ? `Yes! Send ${s.coins} 🪙` : '🔨 Break'}</button></div>)}
+      {sure && !busy && <button className="pill" onClick={() => setSure('')}>Not yet, keep saving</button>}
+      {!approved.length && <p className="muted">Nothing approved yet. Ask to spend above, and when your grown-up says yes it shows up here. 👆</p>}
+      {err && <p className="muted">⚠️ {err}</p>}
+    </>}
+    {receipts.length > 0 && <><label>My receipts 🧾</label>
+      {receipts.map(b => <div key={b.tx} className="rrow"><span>{new Date(b.at).toLocaleDateString()} · {b.what}</span><button className="linkbtn" onClick={() => onReceipt(b)}>🧾 View</button></div>)}</>}
   </section>
 }
 
@@ -170,15 +209,15 @@ function KidScreen({ kid, toast, drop, coinDrop, naira, act, header, extra }: { 
           <div style={{ flex: 1 }}><b>{kid.dream.title}</b><div className="bar"><div style={{ width: pct + '%' }} /></div><small>{kid.coins + kid.seeds} / {kid.dream.coins} coins · {pct}%</small></div></div></section>
       <section className="card"><h2>Quests ⚔️</h2>
         {kid.quests.filter(q => q.status !== 'paid').map(q => <div className="quest" key={q.id}><span className="qe">{q.emoji}</span><div style={{ flex: 1 }}><b>{q.title}</b><small> +{q.coins} coins</small></div>
-          {q.status === 'open' ? <button className="go" onClick={() => act({ op: 'questDone', questId: q.id }, '🎉 Great job! Waiting for a grown-up to check.')}>I did it!</button> : <span className="wait">⏳ Waiting</span>}</div>)}
-        {!kid.quests.some(q => q.status !== 'paid') && <p className="muted">No quests right now. 🏆</p>}</section>
+          {q.status === 'open' ? <button className="go" onClick={() => act({ op: 'questDone', questId: q.id }, '🎉 Great job! Waiting for your grown-up to pay.')}>I did it!</button> : <span className="wait">⏳ Waiting for payment</span>}</div>)}
+        {!kid.quests.some(q => q.status !== 'paid') && <p className="muted">No quests right now. 🏆</p>}
+        {kid.quests.filter(q => q.status === 'paid').slice(-3).reverse().map(q => <div className="quest" key={q.id}><span className="qe">{q.emoji}</span><div style={{ flex: 1 }}><b>{q.title}</b><small> +{q.coins} coins</small></div><span className="wait">✅ Paid!</span></div>)}</section>
       <section className="card"><h2>Patience Seeds 🌱</h2>
         <p className="muted">Don't spend for a week and Piggy grows {bonusAmt} extra coin{bonusAmt > 1 ? 's' : ''}! That is called <b>interest</b>.</p>
         <button className="go wide" disabled={!bonusReady} onClick={() => { coinDrop(); act({ op: 'harvest' }, `🌱 Your patience grew ${bonusAmt} seeds!`) }}>{bonusReady ? `Harvest ${bonusAmt} seeds 🌻` : `Growing… ${Math.ceil((WEEK - (Date.now() - kid.lastBonus)) / 864e5)} days left`}</button></section>
-      <AskSpend coins={kid.coins} onAsk={(what, coins, need) => act({ op: 'ask', spend: { id: uid(), what, coins, need, status: 'asked' } }, '📨 Sent to your grown-up!')} />
-      {kid.spends.slice(-3).reverse().map(sp => <div key={sp.id} className="muted center">{sp.what} ({sp.coins}) — {sp.status === 'asked' ? '⏳ asked' : sp.status === 'ok' ? '✅ yes!' : '🙅 not now'}</div>)}
+      <AskSpend coins={kid.coins - kid.spends.filter(s => s.status === 'ok').reduce((t, s) => t + s.coins, 0)} onAsk={(what, coins, need) => act({ op: 'ask', spend: { id: uid(), what, coins, need, status: 'asked' } }, '📨 Sent to your grown-up!')} />
+      {kid.spends.slice(-3).reverse().map(sp => <div key={sp.id} className="muted center">{sp.what} ({sp.coins} 🪙) — {sp.status === 'asked' ? '⏳ waiting for your grown-up' : sp.status === 'ok' ? '✅ Yes! Break the bank below 👇' : sp.status === 'spent' ? '🧾 done' : '🙅 not now'}</div>)}
       {extra}
-      {(kid.breaks || []).slice(-3).reverse().map(b => <div key={b.tx} className="muted center">🔨 {new Date(b.at).toLocaleDateString()}: broke the bank for {b.what} ({Math.round(b.nim / C.NIM_PER_COIN * 10) / 10} coins)</div>)}
     </main> : <main><section className="card"><h2>Money Badges 🏅</h2><p className="muted">Grow your Piggy to unlock wisdom!</p>
       {LESSONS.map(l => { const on = kid.lessons.includes(l.id); return <div key={l.id} className={'badge ' + (on ? 'got' : 'locked')}><div className="be">{on ? l.emoji : '🔒'}</div><div><b>{l.title}</b><div className="muted">{on ? l.line : `Unlocks at ${l.at} coins`}</div></div></div> })}</section></main>}
   </div>
@@ -232,6 +271,21 @@ function Family({ parent, demo }: { parent: string; demo: boolean }) {
   }
   useEffect(() => { if (!secret) { const s = uid(12) + uid(12); localStorage.setItem(sKey, s); setSecret(s); return } sync(); const i = setInterval(() => sync(), 15_000); return () => clearInterval(i) }, [secret])
   const kid = fam?.kids.find(k => k.id === active) || fam?.kids[0]
+  const rKey = `oinkly-receipts-seen-${P}`
+  const [later, setLater] = useState<string[]>([])
+  const [seen, setSeen] = useState<string[]>(() => JSON.parse(localStorage.getItem(rKey) || '[]'))
+  const [shown, setShown] = useState<{ k: Kid; b: Break } | null>(null)
+  const asking = fam?.kids.flatMap(k => k.spends.filter(s => s.status === 'asked' && !later.includes(s.id)).map(s => ({ k, s })))[0]
+  const fresh = fam?.kids.flatMap(k => (k.breaks || []).filter(b => !seen.includes(b.tx)).map(b => ({ k, b })))[0]
+  const receipt = shown || fresh
+  function closeReceipt() {
+    if (receipt && !seen.includes(receipt.b.tx)) { const n = [...seen, receipt.b.tx].slice(-100); setSeen(n); localStorage.setItem(rKey, JSON.stringify(n)) }
+    setShown(null)
+  }
+  async function decide(k: Kid, s: Spend, ok: boolean) {
+    await sync([{ op: 'spendDecision', kidId: k.id, spendId: s.id, ok }])
+    say(ok ? `✅ ${k.name} can now break the bank for ${s.what}` : `🙅 Told ${k.name} "not now"`)
+  }
   if (view === 'pin') return <Pin pin={localStorage.getItem(pKey) || ''} ok={() => setView('parent')} />
   if (err && !fam) return <div className="app"><section className="card"><h2>😕 Can't open family</h2><p className="muted">{err}</p><Recovery sKey={sKey} secret={secret} /></section></div>
   if (!fam) return <div className="app"><section className="card center">Loading your family…</section></div>
@@ -241,8 +295,18 @@ function Family({ parent, demo }: { parent: string; demo: boolean }) {
   return <div className="app">
     {toast && <div className="toast" role="status">{toast}</div>}
     <header><div className="brand">🐷 Oinkly</div><div className="muted center">Family of <code>{P.slice(0, 4)}…{P.slice(-4)}</code>{C.TESTNET && ' · TESTNET'}{demo && ' · DEMO (payments off)'}{storage === 'memory' && ' · ⚠️ temp storage'}</div></header>
-    <Parent fam={fam} kid={kid} parent={P} demo={demo} kKey={kKey} pKey={pKey} setActive={setActive} sync={sync} say={say} coinDrop={coinDrop} naira={naira} openKid={() => setView('kid')} />
+    <Parent fam={fam} kid={kid} parent={P} demo={demo} kKey={kKey} pKey={pKey} setActive={setActive} sync={sync} say={say} coinDrop={coinDrop} naira={naira} openKid={() => setView('kid')}
+      decide={decide} showReceipt={(k, b) => setShown({ k, b })} />
     <section className="card"><Recovery sKey={sKey} secret={secret} /></section>
+    {receipt ? <Receipt b={receipt.b} name={receipt.k.name} avatar={receipt.k.avatar} forParent onClose={closeReceipt} />
+      : asking && <Modal onClose={() => setLater(l => [...l, asking.s.id])}><div className="center">
+        <div style={{ fontSize: 56 }}>{asking.k.avatar}</div><h2>{asking.k.name} wants to spend</h2>
+        <div className="ask-what">🛍️ {asking.s.what}</div>
+        <p className="muted">{asking.s.coins} coins ({asking.s.coins * C.NIM_PER_COIN} NIM) · {asking.s.need ? '🍎 a Need' : '🎮 a Want'} · {asking.k.name} has {asking.k.coins} coins</p>
+        <p className="muted">If you say yes, {asking.k.name} can break the bank and send you the NIM so you can buy it.</p>
+        <button className="go wide" onClick={() => decide(asking.k, asking.s, true)}>✅ Yes, {asking.k.name} can spend it</button>
+        <div className="row" style={{ justifyContent: 'center' }}><button className="pill" onClick={() => decide(asking.k, asking.s, false)}>🙅 Not now</button><button className="pill" onClick={() => setLater(l => [...l, asking.s.id])}>Decide later</button></div>
+      </div></Modal>}
   </div>
 }
 function applyKidLocal(f: Family, id: string, op: KidOp) { return applyKid(f, id, op) }
@@ -264,8 +328,8 @@ function Pin({ pin, ok }: { pin: string; ok: () => void }) {
   </section></main></div>
 }
 
-type PP = { fam: Family; kid?: Kid; parent: string; demo: boolean; kKey: string; pKey: string; setActive: (id: string) => void; sync: (ops?: ParentOp[], log?: string) => Promise<void>; say: (m: string) => void; coinDrop: () => void; naira: (c: number) => string; openKid: () => void }
-function Parent({ fam, kid, parent, demo, kKey, pKey, setActive, sync, say, coinDrop, naira, openKid }: PP) {
+type PP = { fam: Family; kid?: Kid; parent: string; demo: boolean; kKey: string; pKey: string; setActive: (id: string) => void; sync: (ops?: ParentOp[], log?: string) => Promise<void>; say: (m: string) => void; coinDrop: () => void; naira: (c: number) => string; openKid: () => void; decide: (k: Kid, s: Spend, ok: boolean) => Promise<void>; showReceipt: (k: Kid, b: Break) => void }
+function Parent({ fam, kid, parent, demo, kKey, pKey, setActive, sync, say, coinDrop, naira, openKid, decide, showReceipt }: PP) {
   const [busy, setBusy] = useState('')
   const [q, setQ] = useState({ title: '', emoji: '🧹', coins: 2 })
   const [nk, setNk] = useState({ name: '', avatar: '🦁', paste: '' })
@@ -290,7 +354,7 @@ function Parent({ fam, kid, parent, demo, kKey, pKey, setActive, sync, say, coin
     if (!kid) return
     if (demo) { const op = then('demo-' + uid(6)); if (op) await sync([op], `[demo] ${log}`); coinDrop(); return say(`(demo) Would send ${nim} NIM · "${memo}"`) }
     setBusy(memo)
-    try { const tx = await C.payNim(kid.jar, nim, memo); const op = then(tx); await sync(op ? [op] : [], `${new Date().toLocaleString()} ${log} · ${tx.slice(0, 10)}…`); coinDrop(); say(`✅ Sent ${nim} NIM · ${memo}`); return tx }
+    try { const tx = await C.payNim(kid.jar, nim, memo); const op = then(tx); await sync(op ? [op] : [], `${new Date().toLocaleString()} ${log} · ${tx.slice(0, 10)}…`); coinDrop(); say(`✅ ${kid.name} received ${nim} NIM`); return tx }
     catch (e) { say('⚠️ ' + C.errMsg(e)) } finally { setBusy('') }
   }
   async function link() {
@@ -304,7 +368,17 @@ function Parent({ fam, kid, parent, demo, kKey, pKey, setActive, sync, say, coin
     try { const r = await C.verifyLink(kid.jar, kid.id, parent); await sync([{ op: 'setLinked', kidId: kid.id, tx: r.hash || kid.linkTx || '', linked: r.ok }]); say(r.ok ? '🔗 Link verified on-chain!' : '⏳ ' + r.reason) }
     catch (e) { say('⚠️ ' + C.errMsg(e)) }
   }
-  const ready = kid?.linked
+  const linkSent = !!kid?.linked || !!kid?.linkTx
+  /** Pays the kid; the first payment carries the link memo, so linking needs no extra step. */
+  async function payKid(nim: number, memo: string, then: (tx: string) => ParentOp, log: string) {
+    if (!kid) return
+    if (linkSent) return pay(nim, memo, then, log)
+    const tx = await pay(nim, C.linkMemo(kid.id), then, `${log} (+ linked Piggy)`)
+    if (demo) return sync([{ op: 'setLinked', kidId: kid.id, tx: 'demo', linked: true }])
+    if (tx) { await sync([{ op: 'setLinked', kidId: kid.id, tx, linked: false }]); setTimeout(check, 20_000) }
+  }
+  const done = kid?.quests.filter(x => x.status === 'done') || []
+  const paid = kid?.quests.filter(x => x.status === 'paid').slice(-5).reverse() || []
   return <main>
     {!demo && C.networkMismatch() && <section className="card"><p>⚠️ {C.networkMismatch()}</p></section>}
     <section className="card"><h2>Grown-up corner 👨‍👩‍👧</h2>
@@ -312,31 +386,35 @@ function Parent({ fam, kid, parent, demo, kKey, pKey, setActive, sync, say, coin
       {kid ? <>
         <div className="muted">Piggy: <code style={{ fontSize: 12 }}>{kid.jar}</code><br />{bal == null ? 'Balance: reading chain…' : bal < 0 ? 'Balance: Nimiq RPC unavailable' : `On-chain: ${bal.toFixed(2)} NIM`} · {kid.custody === 'app-key' ? 'key kept on this phone' : 'your own wallet address'}</div>
         {kid.linked ? <p>🔗 <b>Linked to you on-chain</b> {kid.linkTx && kid.linkTx !== 'demo' && <a href={C.txUrl(kid.linkTx)} target="_blank">view</a>}</p>
-          : <div><p className="muted">Step 2: send 1 NIM with memo <code>{C.linkMemo(kid.id)}</code>. The first link to a Piggy decides its grown-up.</p>
-            <div className="row"><button className="go" disabled={!!busy} onClick={link}>🔗 Link Piggy (1 NIM)</button>{kid.linkTx && <button className="pill" onClick={check}>Check link</button>}</div></div>}
-        <div className="row"><button className="pill" onClick={async () => { const url = `${location.origin}/?kid=${kid.token}`; setKeyQr(''); setQr(await QRCode.toDataURL(url, { width: 360, margin: 1 })) }}>📱 Kid's phone</button>
-          {kid.custody === 'app-key' && keys()[kid.id] && <button className="pill" onClick={async () => { setQr(''); setKeyQr(await QRCode.toDataURL(`${location.origin}/#key=${keys()[kid.id]}`, { width: 360, margin: 1 })) }}>🔑 Kid's login key</button>}
+          : <div><p className="muted">{kid.linkTx ? '⏳ Link sent, checking the chain…' : <>Not linked yet. Your first payment to {kid.name} links the Piggy to you automatically (memo <code>{C.linkMemo(kid.id)}</code>), or link now with 1 NIM.</>} The first link to a Piggy decides its grown-up.</p>
+            <div className="row">{!kid.linkTx && <button className="pill" disabled={!!busy} onClick={link}>🔗 Link Piggy (1 NIM)</button>}{kid.linkTx && <button className="pill" onClick={check}>Check link</button>}</div></div>}
+        <div className="row"><button className="pill" onClick={async () => { const url = `${shareOrigin()}/?kid=${kid.token}`; setKeyQr(''); setQr(await QRCode.toDataURL(url, { width: 360, margin: 1 })) }}>📱 Kid's phone</button>
+          {kid.custody === 'app-key' && keys()[kid.id] && <button className="pill" onClick={async () => { setQr(''); setKeyQr(await QRCode.toDataURL(`${shareOrigin()}/#key=${keys()[kid.id]}`, { width: 360, margin: 1 })) }}>🔑 Kid's login key</button>}
           <button className="pill" onClick={openKid}>👀 Open kid screen here</button></div>
         {keyQr && <div className="center"><img src={keyQr} alt={`${kid.name}'s Piggy key`} style={{ width: 220 }} />
           <div className="muted">⚠️ {kid.name} scans this to log in and can then <b>break the bank</b> (send the whole Piggy). Only show it to {kid.name}.</div>
           <input readOnly value={keys()[kid.id]} onFocus={e => e.target.select()} /></div>}
-        {qr && <div className="center"><img src={qr} alt="QR for kid's phone" style={{ width: 220 }} /><div className="muted">Scan with {kid.name}'s phone camera. Shows only {kid.name}'s Piggy, no wallet.</div><input readOnly value={`${location.origin}/?kid=${kid.token}`} onFocus={e => e.target.select()} /></div>}
+        {qr && <div className="center"><img src={qr} alt="QR for kid's phone" style={{ width: 220 }} /><div className="muted">Scan with {kid.name}'s phone camera. Shows only {kid.name}'s Piggy, no wallet.</div><input readOnly value={`${shareOrigin()}/?kid=${kid.token}`} onFocus={e => e.target.select()} /></div>}
       </> : <p className="muted">Add your first child below 👇</p>}
     </section>
 
     {kid && <>
       <section className="card"><h2>Approve quests ✅</h2>
-        {kid.quests.filter(x => x.status === 'done').map(x => <div className="quest" key={x.id}><span className="qe">{x.emoji}</span><div style={{ flex: 1 }}><b>{x.title}</b><small> {x.coins} coins = {x.coins * C.NIM_PER_COIN} NIM {naira(x.coins)}</small></div>
-          <button className="go" disabled={!!busy || !ready} onClick={() => pay(x.coins * C.NIM_PER_COIN, `Quest: ${x.title} · ${kid.name}`, tx => ({ op: 'paidQuest', kidId: kid.id, questId: x.id, tx }), `${kid.name}: Quest ${x.title}`)}>{ready ? 'Pay' : 'Link first'}</button></div>)}
-        {!kid.quests.some(x => x.status === 'done') && <p className="muted">Nothing to approve.</p>}</section>
+        {done.map(x => <div className="quest" key={x.id}><span className="qe">{x.emoji}</span><div style={{ flex: 1 }}><b>{x.title}</b><small> {kid.name} says it's done · {x.coins} coins = {x.coins * C.NIM_PER_COIN} NIM {naira(x.coins)}</small></div>
+          <button className="go" disabled={!!busy} onClick={() => payKid(x.coins * C.NIM_PER_COIN, `Quest: ${x.title} · ${kid.name}`, tx => ({ op: 'paidQuest', kidId: kid.id, questId: x.id, tx }), `${kid.name}: Quest ${x.title}`)}>{busy ? 'Paying…' : linkSent ? 'Pay' : '🔗 Link & pay'}</button></div>)}
+        {!done.length && <p className="muted">Nothing to approve. When {kid.name} taps "I did it!", the quest shows up here.</p>}
+        {!linkSent && done.length > 0 && <p className="muted">This first payment also links {kid.name}'s Piggy to you on-chain.</p>}
+        {paid.length > 0 && <><label>Paid</label>{paid.map(x => <small key={x.id} className="muted" style={{ display: 'block' }}>✅ {x.emoji} {x.title}: {kid.name} received {x.coins * C.NIM_PER_COIN} NIM{x.paidAt ? ` · ${new Date(x.paidAt).toLocaleString()}` : ''} {x.tx && !x.tx.startsWith('demo') && <a href={C.txUrl(x.tx)} target="_blank">view</a>}</small>)}</>}</section>
       <section className="card"><h2>Spend requests 🛍️</h2>
         {kid.spends.filter(x => x.status === 'asked').map(x => <div className="quest" key={x.id}><div style={{ flex: 1 }}><b>{x.what}</b><small> {x.coins} coins · {x.need ? 'Need' : 'Want'}</small></div>
-          <button className="go" onClick={() => sync([{ op: 'spendDecision', kidId: kid.id, spendId: x.id, ok: true }])}>Yes</button>
-          <button className="pill" onClick={() => sync([{ op: 'spendDecision', kidId: kid.id, spendId: x.id, ok: false }])}>Not now</button></div>)}
-        {!kid.spends.some(x => x.status === 'asked') && <p className="muted">No requests.</p>}</section>
+          <button className="go" onClick={() => decide(kid, x, true)}>Yes</button>
+          <button className="pill" onClick={() => decide(kid, x, false)}>Not now</button></div>)}
+        {!kid.spends.some(x => x.status === 'asked') && <p className="muted">No requests.</p>}
+        {kid.spends.filter(x => x.status === 'ok').map(x => <small key={x.id} className="muted" style={{ display: 'block' }}>✅ {x.what} · {x.coins} coins: approved, waiting for {kid.name} to break the bank</small>)}
+        {(kid.breaks || []).slice(-5).reverse().map(b => <div className="rrow" key={b.tx}><span>🧾 {new Date(b.at).toLocaleDateString()} · {b.what} · {b.nim} NIM to you</span><button className="linkbtn" onClick={() => showReceipt(kid, b)}>Receipt</button></div>)}</section>
       <section className="card"><h2>Pocket money 💸</h2>
         <div className="row">{[2, 5, 10, 20].map(v => <button key={v} className={'pill ' + (pocket === v ? 'on' : '')} onClick={() => setPocket(v)}>{v} 🪙</button>)}</div>
-        <button className="go wide" disabled={!!busy || !ready} onClick={() => pay(pocket * C.NIM_PER_COIN, `Pocket money · ${kid.name}`, tx => ({ op: 'pocket', kidId: kid.id, coins: pocket, tx }), `${kid.name}: Pocket money ${pocket}`)}>{ready ? `Send ${pocket} coins (${pocket * C.NIM_PER_COIN} NIM) ${naira(pocket)}` : 'Link Piggy first'}</button></section>
+        <button className="go wide" disabled={!!busy} onClick={() => payKid(pocket * C.NIM_PER_COIN, `Pocket money · ${kid.name}`, tx => ({ op: 'pocket', kidId: kid.id, coins: pocket, tx }), `${kid.name}: Pocket money ${pocket}`)}>{linkSent ? '' : '🔗 Link & '}{linkSent ? 'Send' : 'send'} {pocket} coins ({pocket * C.NIM_PER_COIN} NIM) {naira(pocket)}</button></section>
       <section className="card"><h2>New quest ⚔️</h2>
         <div className="row"><input style={{ width: 60, flex: 'none' }} value={q.emoji} onChange={e => setQ({ ...q, emoji: e.target.value })} /><input placeholder="e.g. Make bed" value={q.title} onChange={e => setQ({ ...q, title: e.target.value })} /></div>
         <div className="row">{[1, 2, 3, 5].map(v => <button key={v} className={'pill ' + (q.coins === v ? 'on' : '')} onClick={() => setQ({ ...q, coins: v })}>{v} 🪙</button>)}</div>

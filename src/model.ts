@@ -1,8 +1,10 @@
 // Shared data model + reducer. Used by the browser (optimistic) and by /api (authoritative).
-export type Quest = { id: string; title: string; emoji: string; coins: number; status: 'open' | 'done' | 'paid'; tx?: string }
+export type Quest = { id: string; title: string; emoji: string; coins: number; status: 'open' | 'done' | 'paid'; tx?: string; paidAt?: number }
 export type Dream = { title: string; emoji: string; coins: number }
-export type Spend = { id: string; what: string; coins: number; need: boolean; status: 'asked' | 'ok' | 'no' }
-export type Break = { at: number; what: string; nim: number; to: 'grown-up' | 'shop'; tx: string }
+export type Spend = { id: string; what: string; coins: number; need: boolean; status: 'asked' | 'ok' | 'no' | 'spent'; tx?: string }
+export type Earned = { emoji: string; title: string; coins: number }
+/** A Piggy payment for an approved spend; `earned` is the receipt's list of quests paid since the last break. */
+export type Break = { at: number; what: string; nim: number; to: 'grown-up' | 'shop'; tx: string; spendId?: string; coins?: number; need?: boolean; earned?: Earned[] }
 export type Kid = {
   id: string; name: string; avatar: string; jar: string; custody: 'app-key' | 'pasted'
   token: string; linkTx?: string; linked?: boolean
@@ -55,9 +57,10 @@ export function applyParent(f: Family, o: ParentOp): Family {
     case 'removeKid': return { ...f, updated: Date.now(), kids: f.kids.filter(k => k.id !== o.kidId) }
     case 'setLinked': return onKid(f, o.kidId, k => ({ ...k, linkTx: o.tx, linked: o.linked }))
     case 'addQuest': return onKid(f, o.kidId, k => ({ ...k, quests: [...k.quests, o.quest] }))
-    case 'paidQuest': return onKid(f, o.kidId, k => { const q = k.quests.find(x => x.id === o.questId); if (!q || q.status === 'paid') return k; return { ...k, coins: k.coins + q.coins, quests: k.quests.map(x => x.id === q.id ? { ...x, status: 'paid', tx: o.tx } : x) } })
+    case 'paidQuest': return onKid(f, o.kidId, k => { const q = k.quests.find(x => x.id === o.questId); if (!q || q.status === 'paid') return k; return { ...k, coins: k.coins + q.coins, quests: k.quests.map(x => x.id === q.id ? { ...x, status: 'paid', tx: o.tx, paidAt: Date.now() } : x) } })
     case 'pocket': return onKid(f, o.kidId, k => ({ ...k, coins: k.coins + o.coins }))
-    case 'spendDecision': return onKid(f, o.kidId, k => { const s = k.spends.find(x => x.id === o.spendId); if (!s || s.status !== 'asked') return k; return { ...k, coins: o.ok ? Math.max(0, k.coins - s.coins) : k.coins, lastBonus: o.ok ? Date.now() : k.lastBonus, spends: k.spends.map(x => x.id === s.id ? { ...x, status: o.ok ? 'ok' : 'no' } : x) } })
+    // Approval only unlocks the spend; coins leave when the kid breaks the bank for it.
+    case 'spendDecision': return onKid(f, o.kidId, k => { const s = k.spends.find(x => x.id === o.spendId); if (!s || s.status !== 'asked') return k; return { ...k, spends: k.spends.map(x => x.id === s.id ? { ...x, status: o.ok ? 'ok' : 'no' } : x) } })
     case 'setDream': return onKid(f, o.kidId, k => ({ ...k, dream: o.dream }))
   }
   return f
@@ -67,7 +70,14 @@ export function applyKid(f: Family, kidId: string, o: KidOp): Family {
     if (o.op === 'questDone') return { ...k, quests: k.quests.map(q => q.id === o.questId && q.status === 'open' ? { ...q, status: 'done' } : q) }
     if (o.op === 'ask') return k.spends.filter(s => s.status === 'asked').length >= 5 ? k : { ...k, spends: [...k.spends, { ...o.spend, status: 'asked' as const }].slice(-20) }
     if (o.op === 'harvest') { if (Date.now() - k.lastBonus < WEEK) return k; return { ...k, seeds: k.seeds + Math.max(1, Math.round(k.coins * 0.05)), lastBonus: Date.now() } }
-    if (o.op === 'broke') { if (!/^[0-9a-f]{64}$/.test(o.brk.tx) || k.breaks?.some(b => b.tx === o.brk.tx)) return k; return { ...k, coins: 0, seeds: 0, lastBonus: Date.now(), breaks: [...(k.breaks || []), { ...o.brk, what: String(o.brk.what).slice(0, 60) }].slice(-10) } }
+    if (o.op === 'broke') {
+      const s = k.spends.find(x => x.id === o.brk.spendId)
+      if (!/^[0-9a-f]{64}$/.test(o.brk.tx) || !s || s.status !== 'ok' || k.breaks?.some(b => b.tx === o.brk.tx)) return k
+      const since = k.breaks?.at(-1)?.at ?? 0
+      const earned = k.quests.filter(q => q.status === 'paid' && (q.paidAt ?? 0) > since).slice(-10).map(({ emoji, title, coins }) => ({ emoji, title, coins }))
+      const brk: Break = { at: Date.now(), what: s.what, coins: s.coins, need: s.need, nim: Number(o.brk.nim) || 0, to: 'grown-up', tx: o.brk.tx, spendId: s.id, earned }
+      return { ...k, coins: Math.max(0, k.coins - s.coins), lastBonus: Date.now(), spends: k.spends.map(x => x.id === s.id ? { ...x, status: 'spent', tx: o.brk.tx } : x), breaks: [...(k.breaks || []), brk].slice(-10) }
+    }
     return k
   })
 }

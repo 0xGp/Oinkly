@@ -37,7 +37,8 @@ Live: https://oinkly-kids.vercel.app
 - Leave your coins in for a week to grow Patience Seeds.
 - Tap **Ask to spend** and choose whether it's a Need or a Want.
 - Open **Badges** to read the money lessons you've unlocked.
-- **Break the bank** when you're ready: say what you're getting, pick "My grown-up buys it" or "Pay a shop", and all your Piggy's NIM is sent at once.
+- **Ask to spend**, and your grown-up gets a pop-up to say yes or not now.
+- **Break the bank** once they say yes: the approved coins go as NIM to your grown-up so they can cash out and buy it. You both get an invoice-style receipt listing the quests that earned it.
 
 ## Network (testnet by default)
 Oinkly runs on the Nimiq **testnet**: balances and link checks read from `rpc.testnet.nimiqwatch.com` and transaction links open `test.nimiq.watch`. To try it:
