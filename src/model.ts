@@ -2,11 +2,12 @@
 export type Quest = { id: string; title: string; emoji: string; coins: number; status: 'open' | 'done' | 'paid'; tx?: string }
 export type Dream = { title: string; emoji: string; coins: number }
 export type Spend = { id: string; what: string; coins: number; need: boolean; status: 'asked' | 'ok' | 'no' }
+export type Break = { at: number; what: string; nim: number; to: 'grown-up' | 'shop'; tx: string }
 export type Kid = {
   id: string; name: string; avatar: string; jar: string; custody: 'app-key' | 'pasted'
   token: string; linkTx?: string; linked?: boolean
   coins: number; seeds: number; lastBonus: number; lessons: string[]
-  dream: Dream; quests: Quest[]; spends: Spend[]
+  dream: Dream; quests: Quest[]; spends: Spend[]; breaks?: Break[]
 }
 export type Family = { parent: string; kids: Kid[]; log: string[]; updated: number }
 export type KidView = Omit<Kid, 'token' | 'custody' | 'jar' | 'linkTx'>
@@ -35,6 +36,7 @@ export type KidOp =
   | { op: 'questDone'; questId: string }
   | { op: 'ask'; spend: Spend }
   | { op: 'harvest' }
+  | { op: 'broke'; brk: Break }
 
 function lessons(k: Kid): Kid {
   const t = k.coins + k.seeds
@@ -65,6 +67,7 @@ export function applyKid(f: Family, kidId: string, o: KidOp): Family {
     if (o.op === 'questDone') return { ...k, quests: k.quests.map(q => q.id === o.questId && q.status === 'open' ? { ...q, status: 'done' } : q) }
     if (o.op === 'ask') return k.spends.filter(s => s.status === 'asked').length >= 5 ? k : { ...k, spends: [...k.spends, { ...o.spend, status: 'asked' as const }].slice(-20) }
     if (o.op === 'harvest') { if (Date.now() - k.lastBonus < WEEK) return k; return { ...k, seeds: k.seeds + Math.max(1, Math.round(k.coins * 0.05)), lastBonus: Date.now() } }
+    if (o.op === 'broke') { if (!/^[0-9a-f]{64}$/.test(o.brk.tx) || k.breaks?.some(b => b.tx === o.brk.tx)) return k; return { ...k, coins: 0, seeds: 0, lastBonus: Date.now(), breaks: [...(k.breaks || []), { ...o.brk, what: String(o.brk.what).slice(0, 60) }].slice(-10) } }
     return k
   })
 }

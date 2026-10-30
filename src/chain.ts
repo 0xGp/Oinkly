@@ -1,6 +1,8 @@
 import { init, getHostNetwork, type Network, type NimiqProvider } from '@nimiq/mini-app-sdk'
+import { addressFromPrivateKey, signPayment } from './keys'
 export const NETWORK: Network = import.meta.env.VITE_NIMIQ_NETWORK === 'mainnet' ? 'mainnet' : 'testnet'
 export const TESTNET = NETWORK === 'testnet'
+const NETWORK_ID = TESTNET ? 5 : 24
 export const RPC = TESTNET ? 'https://rpc.testnet.nimiqwatch.com' : 'https://rpc.nimiqwatch.com'
 export const txUrl = (hash: string) => `https://${TESTNET ? 'test.' : ''}nimiq.watch/#${hash}`
 /** Message if Nimiq Pay is on a different network than this build, else ''. */
@@ -52,7 +54,7 @@ export const linkMemo = (childId: string) => `Oinkly:link:${childId}`
 /** The FIRST incoming "Oinkly:link:" tx to a child address decides its parent. Later links are ignored. */
 export async function verifyLink(child: string, childId: string, parent: string) {
   type Tx = { hash: string; from: string; to: string; recipientData?: string; senderData?: string; data?: string; executionResult?: boolean; blockNumber?: number }
-  const txs = await rpc<Tx[]>('getTransactionsByAddress', [n(child), 500])
+  const txs = await rpc<Tx[]>('getTransactionsByAddress', [n(child), 500, null])
   const links = txs.filter(t => n(t.to) === n(child) && t.executionResult !== false && txt(t.recipientData || t.data).startsWith('Oinkly:link:'))
     .sort((a, b) => (a.blockNumber ?? 0) - (b.blockNumber ?? 0))
   const first = links[0]
@@ -70,3 +72,12 @@ export async function payNim(to: string, nim: number, memo: string) {
   return r
 }
 export const normAddr = (a: string) => a.replace(/\s/g, '').toUpperCase()
+/** Sends the whole Piggy balance, signed in the browser with the Piggy key. */
+export async function breakBank(privHex: string, to: string, memo: string) {
+  const luna = (await rpc<{ balance: number }>('getAccountByAddress', [addressFromPrivateKey(privHex)])).balance
+  if (!luna) throw new Error('Your Piggy is empty on-chain. Ask your grown-up to pay your quests first.')
+  const height = await rpc<number>('getBlockNumber', [])
+  const { hex, hash } = signPayment(privHex, to, BigInt(luna), 0n, height, NETWORK_ID, memo)
+  await rpc('sendRawTransaction', [hex])
+  return { hash, nim: luna / LUNA }
+}

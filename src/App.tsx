@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import * as C from './chain'
-import { newPiggyKey } from './keys'
-import { LESSONS, WEEK, uid, applyParent, applyKid, type Family, type Kid, type KidView, type KidOp, type ParentOp } from './model'
+import { addressFromPrivateKey, cleanKey, newPiggyKey, signLogin, validKey } from './keys'
+import { LESSONS, WEEK, uid, applyParent, applyKid, type Break, type Family, type Kid, type KidView, type KidOp, type ParentOp } from './model'
 
 let actx: AudioContext | null = null
 function clink() {
@@ -20,7 +20,16 @@ const api = async (url: string, init?: RequestInit) => { const r = await fetch(u
 function useToast() { const [t, setT] = useState(''); return [t, (m: string) => { setT(m); setTimeout(() => setT(''), 4000) }] as const }
 function useNgn() { const [v, setV] = useState<number | null>(null); useEffect(() => { C.nimNgn().then(setV).catch(() => {}) }, []); return (c: number) => v ? `≈ ₦${Math.round(c * C.NIM_PER_COIN * v).toLocaleString()}` : '' }
 
+const KEY = 'oinkly-kid-key'
+async function kidLogin(key: string) {
+  const j = await api('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(signLogin(key)) })
+  localStorage.setItem('oinkly-kid-token', j.token); localStorage.setItem(KEY, cleanKey(key))
+  return j as { token: string; name: string }
+}
+
 export default function App() {
+  const hashKey = new URLSearchParams(location.hash.slice(1)).get('key')
+  if (hashKey) return <KidJoin initialKey={hashKey} back={() => { location.replace('/') }} />
   const q = new URLSearchParams(location.search)
   const t = q.get('kid') || localStorage.getItem('oinkly-kid-token')
   if (t) { localStorage.setItem('oinkly-kid-token', t); return <KidApp token={t} /> }
@@ -40,15 +49,27 @@ function Onboard() {
     </section></main></div>
 }
 
-function KidJoin({ back }: { back: () => void }) {
+function KidJoin({ back, initialKey = '' }: { back: () => void; initialKey?: string }) {
   const [v, setV] = useState('')
+  const [key, setKey] = useState(initialKey)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
   const token = (() => { const s = v.trim(); try { return new URL(s).searchParams.get('kid') || '' } catch { return s } })()
+  async function login(k: string) {
+    setBusy(true); setErr('')
+    try { await kidLogin(k); location.replace('/') } catch (e) { setErr((e as Error).message); setBusy(false) }
+  }
+  useEffect(() => { if (initialKey) { history.replaceState(null, '', location.pathname); if (validKey(initialKey)) login(initialKey) } }, [])
   return <div className="app"><header><div className="brand">🐷 Oinkly</div></header><main>
     <section className="card center"><div style={{ fontSize: 90 }}>🧒</div><h2>Hi there!</h2>
-      <p className="muted">Ask your grown-up to open <b>Kid's phone</b> in Oinkly, then scan the QR code with this phone's camera.</p>
-      <p className="muted">Or paste the link they sent you:</p>
+      <p className="muted">Log in with the <b>Piggy key</b> your grown-up made for you. Scan its QR code with this phone's camera, or paste it here.</p>
+      <input placeholder="Paste your Piggy key" autoComplete="off" value={key} onChange={e => setKey(e.target.value)} />
+      <button className="go wide" disabled={!validKey(key) || busy} onClick={() => login(key)}>{busy ? 'Opening…' : 'Log in with my key 🔑'}</button>
+      {err && <p className="muted">😕 {err}</p>}
+    </section>
+    <section className="card center"><p className="muted">No key? Your grown-up can open <b>Kid's phone</b> and you scan that QR code, or paste the link they sent you:</p>
       <input placeholder="Paste your Piggy link" value={v} onChange={e => setV(e.target.value)} />
-      <button className="go wide" disabled={token.length < 16} onClick={() => { location.href = `/?kid=${encodeURIComponent(token)}` }}>Open my Piggy 🐷</button>
+      <button className="pill" disabled={token.length < 16} onClick={() => { location.href = `/?kid=${encodeURIComponent(token)}` }}>Open my Piggy 🐷</button>
       <button className="pill" style={{ marginTop: 10 }} onClick={back}>← Back</button>
     </section></main></div>
 }
@@ -56,6 +77,8 @@ function KidJoin({ back }: { back: () => void }) {
 /* ---------------- KID DEVICE ---------------- */
 function KidApp({ token }: { token: string }) {
   const [kid, setKid] = useState<KidView | null>(null)
+  const [parent, setParent] = useState('')
+  const [key, setKey] = useState(() => localStorage.getItem(KEY) || '')
   const [err, setErr] = useState('')
   const [toast, say] = useToast()
   const prev = useRef(0)
@@ -68,15 +91,65 @@ function KidApp({ token }: { token: string }) {
       const k = j.kid as KidView
       if (prev.current && k.coins + k.seeds > prev.current) { coinDrop(); say('🪙 Coins arrived in your Piggy!') }
       const newL = kid && k.lessons.find(l => !kid.lessons.includes(l)); if (newL) setTimeout(() => say(`🏅 New badge: ${LESSONS.find(l => l.id === newL)?.title}!`), 900)
-      prev.current = k.coins + k.seeds; setKid(k); setErr('')
+      prev.current = k.coins + k.seeds; setKid(k); setParent(j.parent); setErr('')
     } catch (e) { setErr(String((e as Error).message)) }
   }
   useEffect(() => { load(); const i = setInterval(() => load(), 10_000); return () => clearInterval(i) }, [token])
-  if (!kid) return <div className="app"><header><div className="brand">🐷 Oinkly</div></header><section className="card center">{err ? <>😕 {err}<br /><button className="pill" onClick={() => { localStorage.removeItem('oinkly-kid-token'); location.href = '/' }}>Start over</button></> : 'Opening your Piggy…'}</section></div>
-  return <KidScreen kid={kid} toast={toast} drop={drop} coinDrop={coinDrop} naira={naira} act={async (op, msg) => { await load(op); if (msg) say(msg) }} />
+  const logout = () => { localStorage.removeItem('oinkly-kid-token'); localStorage.removeItem(KEY); location.href = '/' }
+  async function addKey(k: string) {
+    try { const j = await kidLogin(k); if (j.token !== token) return logout(); setKey(cleanKey(k)); say('🔑 Key added!') }
+    catch (e) { say('😕 ' + (e as Error).message) }
+  }
+  if (!kid) return <div className="app"><header><div className="brand">🐷 Oinkly</div></header><section className="card center">{err ? <>😕 {err}<br /><button className="pill" onClick={logout}>Start over</button></> : 'Opening your Piggy…'}</section></div>
+  const act = async (op: KidOp, msg?: string) => { await load(op); if (msg) say(msg) }
+  return <KidScreen kid={kid} toast={toast} drop={drop} coinDrop={coinDrop} naira={naira} act={act}
+    header={<button onClick={logout} title="Log out">🚪</button>}
+    extra={<BreakBank name={kid.name} parent={parent} keyHex={key} onKey={addKey}
+      onBroke={b => { coinDrop(); act({ op: 'broke', brk: b }, `🔨 CRASH! ${b.nim} NIM sent. Enjoy your ${b.what}!`) }} />} />
 }
 
-function KidScreen({ kid, toast, drop, coinDrop, naira, act, header }: { kid: KidView; toast: string; drop: number; coinDrop: () => void; naira: (c: number) => string; act: (op: KidOp, msg?: string) => void; header?: React.ReactNode }) {
+function BreakBank({ name, parent, keyHex, onKey, onBroke }: { name: string; parent: string; keyHex: string; onKey: (k: string) => void; onBroke: (b: Break) => void }) {
+  const [bal, setBal] = useState<number | null>(null)
+  const [what, setWhat] = useState('')
+  const [to, setTo] = useState<Break['to']>('grown-up')
+  const [shop, setShop] = useState('')
+  const [sure, setSure] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [k, setK] = useState('')
+  useEffect(() => {
+    if (!keyHex) return
+    const read = () => C.jarBalanceNim(addressFromPrivateKey(keyHex)).then(setBal).catch(() => setBal(-1))
+    read(); const i = setInterval(read, 20_000); return () => clearInterval(i)
+  }, [keyHex])
+  if (!keyHex) return <section className="card"><h2>Break the bank 🔨</h2>
+    <p className="muted">Want to break your Piggy and get what you saved for? Add the Piggy key your grown-up gave you.</p>
+    <input placeholder="Paste your Piggy key" autoComplete="off" value={k} onChange={e => setK(e.target.value)} />
+    <button className="go wide" disabled={!validKey(k)} onClick={() => onKey(k)}>Add my key 🔑</button></section>
+  const dest = to === 'shop' ? shop.trim() : parent
+  const coins = bal && bal > 0 ? Math.round(bal / C.NIM_PER_COIN * 10) / 10 : 0
+  const ready = coins > 0 && !!what.trim() && C.validAddr(dest) && !busy
+  async function smash() {
+    if (!sure) return setSure(true)
+    setBusy(true); setErr('')
+    try {
+      const r = await C.breakBank(keyHex, dest, `Oinkly: ${name} broke the bank for ${what.trim()}`)
+      onBroke({ at: Date.now(), what: what.trim(), nim: r.nim, to, tx: r.hash }); setBal(0); setWhat(''); setSure(false)
+    } catch (e) { setErr(C.errMsg(e)) } finally { setBusy(false) }
+  }
+  return <section className="card"><h2>Break the bank 🔨</h2>
+    <p className="muted">{bal == null ? 'Counting your Piggy…' : bal < 0 ? "Can't reach your Piggy right now." : `Your Piggy holds ${coins} coins.`} Breaking it sends <b>all</b> your coins at once to get what you want.</p>
+    <input placeholder="What are you getting?" value={what} onChange={e => { setWhat(e.target.value); setSure(false) }} />
+    <div className="row"><button className={'pill ' + (to === 'grown-up' ? 'on' : '')} onClick={() => { setTo('grown-up'); setSure(false) }}>🧑 My grown-up buys it</button>
+      <button className={'pill ' + (to === 'shop' ? 'on' : '')} onClick={() => { setTo('shop'); setSure(false) }}>🏪 Pay a shop</button></div>
+    {to === 'shop' && <input placeholder="Shop's Nimiq address (NQ…)" value={shop} onChange={e => { setShop(e.target.value); setSure(false) }} />}
+    <button className="go wide" disabled={!ready} onClick={smash}>{busy ? 'Breaking…' : sure ? `Yes! Send all ${coins} coins 🔨` : coins > 0 ? '🔨 Break the bank!' : 'Piggy is empty'}</button>
+    {sure && !busy && <button className="pill" onClick={() => setSure(false)}>Not yet, keep saving</button>}
+    {err && <p className="muted">⚠️ {err}</p>}
+  </section>
+}
+
+function KidScreen({ kid, toast, drop, coinDrop, naira, act, header, extra }: { kid: KidView; toast: string; drop: number; coinDrop: () => void; naira: (c: number) => string; act: (op: KidOp, msg?: string) => void; header?: React.ReactNode; extra?: React.ReactNode }) {
   const [tab, setTab] = useState<'piggy' | 'badges'>('piggy')
   const pct = Math.min(100, Math.round(((kid.coins + kid.seeds) / kid.dream.coins) * 100))
   const bonusReady = Date.now() - kid.lastBonus >= WEEK
@@ -104,6 +177,8 @@ function KidScreen({ kid, toast, drop, coinDrop, naira, act, header }: { kid: Ki
         <button className="go wide" disabled={!bonusReady} onClick={() => { coinDrop(); act({ op: 'harvest' }, `🌱 Your patience grew ${bonusAmt} seeds!`) }}>{bonusReady ? `Harvest ${bonusAmt} seeds 🌻` : `Growing… ${Math.ceil((WEEK - (Date.now() - kid.lastBonus)) / 864e5)} days left`}</button></section>
       <AskSpend coins={kid.coins} onAsk={(what, coins, need) => act({ op: 'ask', spend: { id: uid(), what, coins, need, status: 'asked' } }, '📨 Sent to your grown-up!')} />
       {kid.spends.slice(-3).reverse().map(sp => <div key={sp.id} className="muted center">{sp.what} ({sp.coins}) — {sp.status === 'asked' ? '⏳ asked' : sp.status === 'ok' ? '✅ yes!' : '🙅 not now'}</div>)}
+      {extra}
+      {(kid.breaks || []).slice(-3).reverse().map(b => <div key={b.tx} className="muted center">🔨 {new Date(b.at).toLocaleDateString()}: broke the bank for {b.what} ({Math.round(b.nim / C.NIM_PER_COIN * 10) / 10} coins)</div>)}
     </main> : <main><section className="card"><h2>Money Badges 🏅</h2><p className="muted">Grow your Piggy to unlock wisdom!</p>
       {LESSONS.map(l => { const on = kid.lessons.includes(l.id); return <div key={l.id} className={'badge ' + (on ? 'got' : 'locked')}><div className="be">{on ? l.emoji : '🔒'}</div><div><b>{l.title}</b><div className="muted">{on ? l.line : `Unlocks at ${l.at} coins`}</div></div></div> })}</section></main>}
   </div>
@@ -196,9 +271,10 @@ function Parent({ fam, kid, parent, demo, kKey, pKey, setActive, sync, say, coin
   const [nk, setNk] = useState({ name: '', avatar: '🦁', paste: '' })
   const [pocket, setPocket] = useState(5)
   const [qr, setQr] = useState('')
+  const [keyQr, setKeyQr] = useState('')
   const [bal, setBal] = useState<number | null>(null)
   const [pin, setPin] = useState(localStorage.getItem(pKey) || '')
-  useEffect(() => { setQr(''); setBal(null); if (kid) C.jarBalanceNim(kid.jar).then(setBal).catch(() => setBal(-1)) }, [kid?.id])
+  useEffect(() => { setQr(''); setKeyQr(''); setBal(null); if (kid) C.jarBalanceNim(kid.jar).then(setBal).catch(() => setBal(-1)) }, [kid?.id])
   const keys = (): Record<string, string> => JSON.parse(localStorage.getItem(kKey) || '{}')
 
   async function createPiggy() {
@@ -238,7 +314,12 @@ function Parent({ fam, kid, parent, demo, kKey, pKey, setActive, sync, say, coin
         {kid.linked ? <p>🔗 <b>Linked to you on-chain</b> {kid.linkTx && kid.linkTx !== 'demo' && <a href={C.txUrl(kid.linkTx)} target="_blank">view</a>}</p>
           : <div><p className="muted">Step 2: send 1 NIM with memo <code>{C.linkMemo(kid.id)}</code>. The first link to a Piggy decides its grown-up.</p>
             <div className="row"><button className="go" disabled={!!busy} onClick={link}>🔗 Link Piggy (1 NIM)</button>{kid.linkTx && <button className="pill" onClick={check}>Check link</button>}</div></div>}
-        <div className="row"><button className="pill" onClick={async () => { const url = `${location.origin}/?kid=${kid.token}`; setQr(await QRCode.toDataURL(url, { width: 360, margin: 1 })) }}>📱 Kid's phone</button><button className="pill" onClick={openKid}>👀 Open kid screen here</button></div>
+        <div className="row"><button className="pill" onClick={async () => { const url = `${location.origin}/?kid=${kid.token}`; setKeyQr(''); setQr(await QRCode.toDataURL(url, { width: 360, margin: 1 })) }}>📱 Kid's phone</button>
+          {kid.custody === 'app-key' && keys()[kid.id] && <button className="pill" onClick={async () => { setQr(''); setKeyQr(await QRCode.toDataURL(`${location.origin}/#key=${keys()[kid.id]}`, { width: 360, margin: 1 })) }}>🔑 Kid's login key</button>}
+          <button className="pill" onClick={openKid}>👀 Open kid screen here</button></div>
+        {keyQr && <div className="center"><img src={keyQr} alt={`${kid.name}'s Piggy key`} style={{ width: 220 }} />
+          <div className="muted">⚠️ {kid.name} scans this to log in and can then <b>break the bank</b> (send the whole Piggy). Only show it to {kid.name}.</div>
+          <input readOnly value={keys()[kid.id]} onFocus={e => e.target.select()} /></div>}
         {qr && <div className="center"><img src={qr} alt="QR for kid's phone" style={{ width: 220 }} /><div className="muted">Scan with {kid.name}'s phone camera. Shows only {kid.name}'s Piggy, no wallet.</div><input readOnly value={`${location.origin}/?kid=${kid.token}`} onFocus={e => e.target.select()} /></div>}
       </> : <p className="muted">Add your first child below 👇</p>}
     </section>

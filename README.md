@@ -24,17 +24,20 @@ Live: https://oinkly-kids.vercel.app
 2. **Add child:** type a name, pick an animal and tap **Create Piggy**. Oinkly makes a new Nimiq address for the child (the key stays on your phone; back it up in Settings). You can paste an existing Nimiq address instead.
 3. **Link Piggy:** send 1 NIM with memo `Oinkly:link:<childId>`, then tap **Check link**. The first link payment to a Piggy decides its grown-up, and later ones are ignored.
 4. **Kid's phone:** tap it to show a QR code. Your child scans it and sees only their own Piggy, with no wallet.
+   **Kid's login key:** shows the Piggy's private key as a QR code. Your child scans it (or pastes the key) to log in, and can then **break the bank**.
 5. Add Quests and set the Dream. When your child taps "I did it!", tap **Pay**: Nimiq Pay sends the NIM with a note like `Quest: Make bed · Ada`.
 6. Send **Pocket money** in one tap, and answer "Ask to spend" requests.
 7. Settings: set a 4-digit PIN, back up Piggy keys, and copy the **family recovery code** to open the family on a second grown-up phone.
 
 ## For kids
+- Tap **No, I'm a kid** and log in with the Piggy key your grown-up gave you.
 - Tap the piggy and watch the coins drop in.
 - Do a Quest and tap **I did it!**, then wait for a grown-up to approve it.
 - Watch your Dream picture get more colourful as you save.
 - Leave your coins in for a week to grow Patience Seeds.
 - Tap **Ask to spend** and choose whether it's a Need or a Want.
 - Open **Badges** to read the money lessons you've unlocked.
+- **Break the bank** when you're ready: say what you're getting, pick "My grown-up buys it" or "Pay a shop", and all your Piggy's NIM is sent at once.
 
 ## Network (testnet by default)
 Oinkly runs on the Nimiq **testnet**: balances and link checks read from `rpc.testnet.nimiqwatch.com` and transaction links open `test.nimiq.watch`. To try it:
