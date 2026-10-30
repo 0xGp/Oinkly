@@ -65,3 +65,6 @@ npm install
 npx vercel dev   # runs the app plus the /api sync functions
 ```
 Built with Vite, React and TypeScript, Vercel functions and Vercel Blob. Set `BLOB_READ_WRITE_TOKEN` for persistent sync; without it the API uses temporary in-memory storage.
+
+## License
+[MIT](LICENSE)
