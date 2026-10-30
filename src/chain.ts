@@ -1,6 +1,7 @@
 import { init, getHostNetwork, type Network, type NimiqProvider } from '@nimiq/mini-app-sdk'
 import { addressFromPrivateKey, signPayment } from './keys'
-export const NETWORK: Network = import.meta.env.VITE_NIMIQ_NETWORK === 'mainnet' ? 'mainnet' : 'testnet'
+const WANT = import.meta.env.VITE_NIMIQ_NETWORK
+export const NETWORK: Network = WANT === 'mainnet' || WANT === 'testnet' ? WANT : import.meta.env.PROD ? 'mainnet' : 'testnet'
 export const TESTNET = NETWORK === 'testnet'
 const NETWORK_ID = TESTNET ? 5 : 24
 export const RPC = TESTNET ? 'https://rpc.testnet.nimiqwatch.com' : 'https://rpc.nimiqwatch.com'

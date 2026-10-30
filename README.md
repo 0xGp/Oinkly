@@ -42,13 +42,13 @@ Live: https://oinkly-kids.vercel.app
 - **Ask to spend**, and your grown-up gets a pop-up to say yes or not now.
 - **Break the bank** once they say yes: the approved coins go as NIM to your grown-up so they can cash out and buy it. You both get an invoice-style receipt listing the quests that earned it.
 
-## Network (testnet by default)
-Oinkly runs on the Nimiq **testnet**: balances and link checks read from `rpc.testnet.nimiqwatch.com` and transaction links open `test.nimiq.watch`. To try it:
+## Network
+The live app runs on Nimiq **mainnet** with real NIM. Local development (`npm run dev`) uses **testnet**, with balances from `rpc.testnet.nimiqwatch.com` and links to `test.nimiq.watch`. To test there:
 1. In Nimiq Pay, long-press **Settings** for about 10 seconds to open the developer menu, then switch to **Testnet**.
 2. Tap **Get free NIM**.
 3. Payments from Oinkly now use test NIM. If Nimiq Pay is on a different network than Oinkly, the grown-up corner shows a warning and payments are blocked.
 
-To build for mainnet (real NIM), set `VITE_NIMIQ_NETWORK=mainnet`.
+Set `VITE_NIMIQ_NETWORK=testnet` or `mainnet` to override the default for any build.
 
 ## Limits right now
 - Created Piggy keys live only on the parent's phone. Back them up.
